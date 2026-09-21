@@ -1,83 +1,176 @@
-# voice2text — автономные сборки speech-to-text
+# voice2text
 
-Готовые архивы для macOS, Linux и Windows лежат в
-[Releases](https://github.com/olegshirko/voice2text/releases): распаковать
-и запустить, ничего ставить не нужно. Инструкция для пользователя внутри
-каждого архива и в [README.dist.md](README.dist.md).
+Офлайн-распознавание речи из видео и аудио для macOS, Linux и Windows.
+Один архив на платформу: распаковать и запустить, ничего устанавливать
+не нужно. Внутри [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
+модель Whisper large-v3-turbo, ffmpeg и HTTP-сервер с API, совместимым
+с OpenAI.
 
-Сборочный скрипт, который делает из whisper.cpp, модели Whisper и
-статического ffmpeg пять самодостаточных архивов:
+## Скачать
 
-| Архив | Что внутри |
+[Releases](https://github.com/olegshirko/voice2text/releases/latest)
+
+| Архив | Платформа |
 |---|---|
-| `voice2text-macos-*.zip` | универсальный whisper-cli (arm64 + x86_64, Metal), собран здесь из исходников |
-| `voice2text-linux-x64-*.zip`, `-linux-arm64-*.zip` | бинарники из релиза whisper.cpp (ubuntu-22.04) |
-| `voice2text-windows-x64-*.zip`, `-windows-arm64-*.zip` | бинарники из релиза whisper.cpp (MSVC) |
+| `voice2text-macos-*.zip` | macOS 12+, Intel и Apple Silicon |
+| `voice2text-linux-x64-*.zip` | Linux x86-64, glibc 2.35+ (Ubuntu 22.04, Debian 12 и новее) |
+| `voice2text-linux-arm64-*.zip` | Linux ARM64, glibc 2.35+ |
+| `voice2text-windows-x64-*.zip` | Windows 10/11 x64 |
+| `voice2text-windows-arm64-*.zip` | Windows 11 ARM64 |
 
-Каждый архив содержит `bin/` (whisper-cli, ffmpeg), `models/` (одна
-`ggml-*.bin`), скрипты запуска, HTTP-сервер `voice2text-server` и
-`README.md` для конечного пользователя (это
-[README.dist.md](README.dist.md)).
+Каждый архив около 570 МБ, из них 550 МБ занимает модель.
 
-## Сервер
+## Использование
 
-[server/](server/) — Go без зависимостей, кросс-компилируется в `build.sh`
-под все пять целей (macOS через `lipo` в универсальный бинарник). Отдаёт
-OpenAI-совместимый `POST /v1/audio/transcriptions`: принимает multipart,
-гонит файл через ffmpeg и whisper-cli из `bin/` рядом с собой, отдаёт
-`json`, `text`, `srt`, `vtt` или `verbose_json`. Флаг `-emulate-429`
-(`every:N`, `percent:P`, `first:N`, `always`) заставляет его отвечать
-429 в формате OpenAI с `Retry-After` (флаг `-retry-after`), чтобы
-проверять ретраи у клиентов. Логика выбора запросов детерминированная,
-покрыта тестами, `build.sh` их прогоняет перед сборкой.
+Входной файл может быть любым, который открывает ffmpeg: mp4, mkv, mov,
+webm, mp3, m4a, wav, ogg. Рядом с ним появятся `<имя>.txt` и `<имя>.srt`.
 
-## Сборка
+macOS и Linux:
 
 ```bash
-./build.sh                 # все платформы
-./build.sh windows-x64     # одна
+./transcribe.sh lecture.mp4        # русский
+./transcribe.sh lecture.mp4 en     # другой язык, auto для автоопределения
+```
+
+Windows: перетащить файл на `transcribe.bat` или из командной строки:
+
+```bat
+transcribe.bat "C:\video\lecture.mp4"
+transcribe.bat "C:\video\lecture.mp4" en
+```
+
+### Первый запуск
+
+- **macOS.** Бинарники не подписаны Apple. Скрипт сам снимает с них
+  карантин, поэтому запускать нужно из терминала, а не двойным кликом.
+- **Windows.** SmartScreen может спросить про неизвестное приложение:
+  «Подробнее», затем «Выполнить в любом случае». Если в системе нет
+  Visual C++ Runtime, скрипт скачает его с сайта Microsoft и попросит
+  права администратора. Это происходит один раз.
+- **Linux.** Дополнительных пакетов не требуется.
+
+## HTTP-сервер
+
+Сервер реализует `POST /v1/audio/transcriptions` в формате OpenAI Audio
+API. Любой клиент OpenAI работает с ним после замены base URL.
+
+```bash
+./serve.sh                       # macOS, Linux
+serve.bat                        # Windows
+./serve.sh -addr 0.0.0.0:9000    # слушать на всех интерфейсах
+```
+
+```bash
+curl http://127.0.0.1:8080/v1/audio/transcriptions \
+  -F file=@lecture.mp4 -F language=ru
+```
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8080/v1", api_key="local")
+result = client.audio.transcriptions.create(model="whisper-1", file=open("lecture.mp4", "rb"))
+print(result.text)
+```
+
+Поля запроса:
+
+| Поле | Значение |
+|---|---|
+| `file` | обязательное, любой формат |
+| `language` | код языка, по умолчанию `ru` |
+| `response_format` | `json` (по умолчанию), `text`, `srt`, `vtt`, `verbose_json` |
+| `prompt` | подсказка для модели |
+| `model` | принимается и игнорируется |
+
+Также доступны `GET /health` и `GET /v1/models`.
+
+Флаги сервера:
+
+| Флаг | По умолчанию | Назначение |
+|---|---|---|
+| `-addr` | `127.0.0.1:8080` | адрес и порт |
+| `-lang` | `ru` | язык, если клиент не передал `language` |
+| `-threads` | число ядер | потоков whisper-cli |
+| `-concurrency` | `1` | сколько запросов распознаются одновременно |
+| `-model` | первая `ggml-*.bin` в `models/` | путь к модели |
+| `-emulate-429` | выключено | имитация rate limit, см. ниже |
+| `-retry-after` | `20` | значение `Retry-After` для имитируемых 429 |
+
+### Имитация 429
+
+Для проверки ретраев у клиентов сервер может отвечать
+`429 Too Many Requests` в формате OpenAI: заголовки `Retry-After` и
+`x-ratelimit-*`, тело с `"type": "rate_limit_error"`.
+
+```bash
+./serve.sh -emulate-429 every:3      # каждый третий запрос
+./serve.sh -emulate-429 percent:30   # первые 30 из каждых 100
+./serve.sh -emulate-429 first:5      # первые пять, дальше без ограничений
+./serve.sh -emulate-429 always       # все
+./serve.sh -emulate-429 every:2 -retry-after 60
+```
+
+Отклонённые запросы не доходят до распознавания. `/health` и
+`/v1/models` под имитацию не попадают.
+
+## Требования
+
+- Оперативная память: 1,5 ГБ свободной.
+- CPU: x86-64 с SSE4.2 или ARM64. Оптимизации под AVX2, AVX-512 и Zen4
+  выбираются автоматически.
+- GPU не нужен. На Apple Silicon используется Metal.
+
+Ориентировочная скорость: час записи за 10–30 минут на ноутбуке, за 2–5
+минут на Apple Silicon или современном десктопе.
+
+## Модель
+
+В `models/` лежит `ggml-large-v3-turbo-q5_0.bin`. Её можно заменить
+любой другой из
+[ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main),
+скрипты берут первый найденный `ggml-*.bin`:
+
+| Модель | Размер | Когда брать |
+|---|---|---|
+| `ggml-small-q5_1.bin` | 190 МБ | слабые машины, в 3–4 раза быстрее, хуже на русском |
+| `ggml-large-v3-turbo-q5_0.bin` | 550 МБ | по умолчанию |
+| `ggml-large-v3-q5_0.bin` | 1,1 ГБ | максимальная точность, в 3 раза медленнее |
+
+## Сборка из исходников
+
+Сборка выполняется на macOS. Нужны Xcode Command Line Tools, cmake, Go,
+gh, curl, zip.
+
+```bash
+./build.sh                             # все платформы
+./build.sh windows-x64                 # одна
 MODEL=ggml-small-q5_1.bin ./build.sh   # с другой моделью
 ```
 
-Нужны: macOS с Xcode Command Line Tools, cmake, gh (для скачивания
-релизов с GitHub), curl, zip. Всё скачанное и собранное лежит в `.cache/`,
-повторные сборки ничего не качают. Результат в `dist/`.
+Скрипт скачивает бинарники whisper.cpp из его релизов, статический
+ffmpeg, модель с Hugging Face и libgomp из пакетов Ubuntu, собирает
+whisper-cli для macOS из исходников (универсальный бинарник с Metal),
+кросс-компилирует сервер из [server/](server/) и складывает архивы в
+`dist/`. Загрузки кэшируются в `.cache/`. Версии зависимостей
+закреплены в начале `build.sh`.
 
-Версии закреплены в начале `build.sh`: тег whisper.cpp, номер его
-пре-релиза с бинарниками (у whisper.cpp бинарники прикреплены к
-пре-релизам `bNNNN`, а не к тегам версий) и тег ffmpeg-static.
-
-## Как устроен запуск
-
-`launcher/transcribe.sh` и `launcher/transcribe.bat` делают одно и то же:
-ffmpeg → 16 кГц моно WAV → whisper-cli → `.txt` и `.srt` рядом с
-исходником. Особенности платформ, которые пришлось учесть:
-
-- **macOS**: бинарники без подписи Apple, поэтому скрипт снимает
-  карантин Gatekeeper (`xattr -dr com.apple.quarantine`). ffmpeg два,
-  скрипт выбирает по `uname -m`.
-- **Linux**: whisper-cli слинкован динамически с `libwhisper.so` и
-  вариантами `libggml-cpu-*.so`, все лежат в `bin/`, скрипт выставляет
-  `LD_LIBRARY_PATH`. Ещё ему нужна `libgomp.so.1`, которой в минимальных
-  системах нет, поэтому она берётся из пакета `libgomp1` Ubuntu 22.04 и
-  тоже кладётся в `bin/`.
-- **Windows**: whisper-cli собран MSVC и требует VC++ runtime, скрипт
-  ставит его с aka.ms, если нет. Пути с кириллицей не доходят до
-  whisper-cli целыми, поэтому он работает с ASCII-путём в `%TEMP%`, а
-  результат переносится `move`. Сам `.bat` только ASCII и с CRLF.
-
-## Что проверено
-
-| Пакет | Проверка |
-|---|---|
-| macos | arm64 на этой машине, с выставленным карантином, Metal включается. x86_64-срез не запускался (нет Rosetta). Сервер: curl и официальный SDK OpenAI, включая его ретраи на имитируемые 429 |
-| linux-arm64 | минимальный Debian 12 в Docker: transcribe.sh и сервер с `-emulate-429 every:2` |
-| linux-x64 | не запускался (не было x64-образа), бинарники те же, что arm64, плюс варианты CPU |
-| windows-x64, windows-arm64 | не запускались, нужна Windows-машина |
-
-## Выпуск
+Выпуск:
 
 ```bash
-./build.sh
-gh release create v$(date +%Y%m%d) dist/*.zip --title "voice2text $(date +%Y%m%d)"
+gh release create v$(date +%Y%m%d) dist/*.zip
 ```
+
+## Состояние
+
+| Платформа | Проверка |
+|---|---|
+| macOS Apple Silicon | распознавание и сервер, включая ретраи OpenAI SDK на имитируемые 429 |
+| Linux ARM64 | распознавание и сервер в Debian 12 |
+| macOS Intel, Linux x64, Windows | собраны из тех же официальных бинарников, на реальных машинах не запускались |
+
+## Лицензии
+
+Код репозитория: MIT. Компоненты в архивах: whisper.cpp (MIT), веса
+Whisper (MIT), ffmpeg (GPL), libgomp (GPL с runtime exception). Подробнее
+в [licenses/](licenses/).
