@@ -41,7 +41,7 @@ rem so it works on an ASCII temp file and the result is moved afterwards.
 set "TMPBASE=%TEMP%\voice2text-%RANDOM%%RANDOM%"
 
 echo [1/2] extracting audio...
-"%HERE%bin\ffmpeg.exe" -v error -y -i "%IN%" -vn -ac 1 -ar 16000 -c:a pcm_s16le "%TMPBASE%.wav"
+"%HERE%bin\ffmpeg.exe" -nostdin -v error -y -i "%IN%" -vn -ac 1 -ar 16000 -c:a pcm_s16le "%TMPBASE%.wav"
 if errorlevel 1 goto :err
 
 echo [2/2] transcribing, lang=%LANGC%, threads=%NUMBER_OF_PROCESSORS%...
