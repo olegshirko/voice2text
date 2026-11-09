@@ -72,6 +72,7 @@ func main() {
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /v1/models", s.models)
 	mux.HandleFunc("POST /v1/audio/transcriptions", s.transcribe)
+	mux.HandleFunc("POST /v1/audio/translations", s.translate)
 	mux.HandleFunc("POST /inference", s.transcribe) // как у whisper-server
 
 	log.Printf("voice2text-server: model=%s lang=%s threads=%d concurrency=%d", filepath.Base(t.model), t.lang, t.threads, *concurrency)
@@ -164,7 +165,17 @@ func (s *server) models(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// transcribe — POST /v1/audio/transcriptions, распознавание как есть.
 func (s *server) transcribe(w http.ResponseWriter, r *http.Request) {
+	s.transcribeTask("transcribe", w, r)
+}
+
+// translate — POST /v1/audio/translations, OpenAI всегда переводит на английский.
+func (s *server) translate(w http.ResponseWriter, r *http.Request) {
+	s.transcribeTask("translate", w, r)
+}
+
+func (s *server) transcribeTask(task string, w http.ResponseWriter, r *http.Request) {
 	if s.limiter.reject() {
 		w.Header().Set("Retry-After", strconv.Itoa(s.retryAfter))
 		w.Header().Set("x-ratelimit-limit-requests", "60")
@@ -201,7 +212,7 @@ func (s *server) transcribe(w http.ResponseWriter, r *http.Request) {
 		lang = s.t.lang
 	}
 
-	res, err := s.t.run(r.Context(), file, filepath.Ext(hdr.Filename), lang, r.FormValue("prompt"))
+	res, err := s.t.run(r.Context(), file, filepath.Ext(hdr.Filename), task, lang, r.FormValue("prompt"))
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return
@@ -274,7 +285,7 @@ type result struct {
 	segments []segment
 }
 
-func (t *transcriber) run(ctx context.Context, src io.Reader, ext, lang, prompt string) (*result, error) {
+func (t *transcriber) run(ctx context.Context, src io.Reader, ext, task, lang, prompt string) (*result, error) {
 	dir, err := os.MkdirTemp("", "voice2text-")
 	if err != nil {
 		return nil, err
@@ -308,6 +319,9 @@ func (t *transcriber) run(ctx context.Context, src io.Reader, ext, lang, prompt 
 
 	outBase := filepath.Join(dir, "out")
 	args := []string{"-m", t.model, "-l", lang, "-t", strconv.Itoa(t.threads), "-f", wav, "-oj", "-of", outBase, "-np"}
+	if task == "translate" {
+		args = append(args, "-tr")
+	}
 	if prompt != "" {
 		args = append(args, "--prompt", prompt)
 	}

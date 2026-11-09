@@ -97,6 +97,22 @@ func TestHealthVersion(t *testing.T) {
 	}
 }
 
+func TestTranslationsRequiresFile(t *testing.T) {
+	s := &server{t: &transcriber{model: "m.bin"}}
+	var buf strings.Builder
+	buf.WriteString("--X\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\nen\r\n--X--\r\n")
+	req := httptest.NewRequest("POST", "/v1/audio/translations", strings.NewReader(buf.String()))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=X")
+	rec := httptest.NewRecorder()
+	s.translate(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", rec.Code)
+	}
+	if !contains(rec.Body.String(), `"code":"missing_file"`) {
+		t.Errorf("body %s lacks missing_file", rec.Body.String())
+	}
+}
+
 func TestFormats(t *testing.T) {
 	r := &result{segments: []segment{{0, 1500, "Привет"}, {1500, 3725, "мир"}}}
 	if got := r.text(); got != "Привет мир" {
