@@ -42,6 +42,7 @@ func main() {
 		concurrency = flag.Int("concurrency", 1, "сколько запросов распознаются одновременно, остальные ждут")
 		emulate429  = flag.String("emulate-429", "", "имитировать 429: every:N (каждый N-й запрос), percent:P (P% запросов), first:N (первые N), always")
 		emulate500  = flag.String("emulate-500", "", "имитировать 500 (та же grammar): тренажёр отличения серверных ошибок от rate limit")
+		slow        = flag.Int("slow", 0, "задержка ответа в секундах: тренажёр таймаутов клиента")
 		retryAfter  = flag.Int("retry-after", 20, "заголовок Retry-After в секундах для имитируемых 429")
 	)
 	flag.Parse()
@@ -75,7 +76,7 @@ func main() {
 		}
 	}
 
-	s := &server{t: t, limiter: limiter, limiter500: limiter500, retryAfter: *retryAfter}
+	s := &server{t: t, limiter: limiter, limiter500: limiter500, slow: time.Duration(*slow) * time.Second, retryAfter: *retryAfter}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /v1/models", s.models)
@@ -163,8 +164,9 @@ func (l *limiter) reject() bool {
 
 type server struct {
 	t          *transcriber
-	limiter    *limiter // -emulate-429
-	limiter500 *limiter // -emulate-500
+	limiter    *limiter      // -emulate-429
+	limiter500 *limiter      // -emulate-500
+	slow       time.Duration // -slow: пауза перед успешным ответом, тренажёр таймаутов
 	retryAfter int
 }
 
@@ -207,6 +209,14 @@ func (s *server) transcribeTask(task string, w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "server_error", "server_error",
 			"Internal server error (emulated)")
 		return
+	}
+	// Задержка только на пути к успешному ответу: отклонённые уходят быстро.
+	if s.slow > 0 {
+		select {
+		case <-time.After(s.slow):
+		case <-r.Context().Done():
+			return
+		}
 	}
 
 	if err := r.ParseMultipartForm(64 << 20); err != nil {

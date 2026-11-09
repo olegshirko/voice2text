@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // wavHeader — минимальный валидный RIFF/WAVE-заголовок 16-битного моно PCM.
@@ -210,6 +211,43 @@ func TestAutoDetectLang(t *testing.T) {
 	args := stubArgs(t, argsFile)
 	if hasFlag(args, "-np") {
 		t.Errorf("with language=auto, -np must be omitted so whisper-cli reports the detected language: %v", args)
+	}
+}
+
+func TestSlowDelayAndFast429(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	t.Setenv("ARGS_FILE", argsFile)
+	s := newStubServer(t)
+	s.slow = time.Second
+	l429, _ := parseEmulateSpec("first:1")
+	s.limiter = l429
+
+	// Первый запрос отклоняется 429 — быстро, задержка не применяется.
+	start := time.Now()
+	body, ct := multipartFile(t, "a.mp3", nil)
+	req := httptest.NewRequest("POST", "/v1/audio/transcriptions", body)
+	req.Header.Set("Content-Type", ct)
+	rec := httptest.NewRecorder()
+	s.transcribe(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("first request: status %d, want 429", rec.Code)
+	}
+	if d := time.Since(start); d >= 500*time.Millisecond {
+		t.Errorf("429 must not be delayed by -slow, took %v", d)
+	}
+
+	// Второй проходит — с задержкой не меньше -slow.
+	start = time.Now()
+	body, ct = multipartFile(t, "a.mp3", nil)
+	req = httptest.NewRequest("POST", "/v1/audio/transcriptions", body)
+	req.Header.Set("Content-Type", ct)
+	rec = httptest.NewRecorder()
+	s.transcribe(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second request: status %d: %s", rec.Code, rec.Body.String())
+	}
+	if d := time.Since(start); d < time.Second {
+		t.Errorf("-slow must delay the response, took only %v", d)
 	}
 }
 
