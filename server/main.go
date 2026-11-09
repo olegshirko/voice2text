@@ -42,6 +42,7 @@ func main() {
 		concurrency = flag.Int("concurrency", 1, "сколько запросов распознаются одновременно, остальные ждут")
 		emulate429  = flag.String("emulate-429", "", "имитировать 429: every:N (каждый N-й запрос), percent:P (P% запросов), first:N (первые N), always")
 		emulate500  = flag.String("emulate-500", "", "имитировать 500 (та же grammar): тренажёр отличения серверных ошибок от rate limit")
+		brokenJSON  = flag.String("emulate-broken-json", "", "имитировать обрезанный JSON при ответе 200 (та же grammar): тренажёр валидации ответа")
 		slow        = flag.Int("slow", 0, "задержка ответа в секундах: тренажёр таймаутов клиента")
 		retryAfter  = flag.Int("retry-after", 20, "заголовок Retry-After в секундах для имитируемых 429")
 	)
@@ -54,6 +55,10 @@ func main() {
 	limiter500, err := parseEmulateSpec(*emulate500)
 	if err != nil {
 		log.Fatalf("-emulate-500: %v", err)
+	}
+	brokenJSONLimiter, err := parseEmulateSpec(*brokenJSON)
+	if err != nil {
+		log.Fatalf("-emulate-broken-json: %v", err)
 	}
 	if *model == "" {
 		*model, err = findModel(filepath.Join(root, "models"))
@@ -76,7 +81,7 @@ func main() {
 		}
 	}
 
-	s := &server{t: t, limiter: limiter, limiter500: limiter500, slow: time.Duration(*slow) * time.Second, retryAfter: *retryAfter}
+	s := &server{t: t, limiter: limiter, limiter500: limiter500, brokenJSON: brokenJSONLimiter, slow: time.Duration(*slow) * time.Second, retryAfter: *retryAfter}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /v1/models", s.models)
@@ -166,6 +171,7 @@ type server struct {
 	t          *transcriber
 	limiter    *limiter      // -emulate-429
 	limiter500 *limiter      // -emulate-500
+	brokenJSON *limiter      // -emulate-broken-json
 	slow       time.Duration // -slow: пауза перед успешным ответом, тренажёр таймаутов
 	retryAfter int
 }
@@ -257,6 +263,13 @@ func (s *server) transcribeTask(task string, w http.ResponseWriter, r *http.Requ
 
 	switch format {
 	case "json":
+		if s.brokenJSON.reject() {
+			// 200 с обрезанным JSON: клиент обязан валидировать тело ответа.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			io.WriteString(w, fmt.Sprintf(`{"text": "%.20s`, res.text()))
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"text": res.text()})
 	case "verbose_json":
 		writeJSON(w, http.StatusOK, res.verbose(lang))

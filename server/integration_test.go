@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -211,6 +212,29 @@ func TestAutoDetectLang(t *testing.T) {
 	args := stubArgs(t, argsFile)
 	if hasFlag(args, "-np") {
 		t.Errorf("with language=auto, -np must be omitted so whisper-cli reports the detected language: %v", args)
+	}
+}
+
+func TestEmulateBrokenJSON(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	t.Setenv("ARGS_FILE", argsFile)
+	s := newStubServer(t)
+	broken, _ := parseEmulateSpec("always")
+	s.brokenJSON = broken
+
+	body, ct := multipartFile(t, "a.mp3", nil)
+	req := httptest.NewRequest("POST", "/v1/audio/transcriptions", body)
+	req.Header.Set("Content-Type", ct)
+	rec := httptest.NewRecorder()
+	s.transcribe(rec, req)
+
+	// 200 с невалидным телом — клиент обязан это обнаружить сам.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d, want 200", rec.Code)
+	}
+	var v map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &v); err == nil {
+		t.Errorf("body must be broken json, parsed fine: %s", rec.Body.String())
 	}
 }
 
