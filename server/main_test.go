@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -204,6 +205,31 @@ func Test429And500Independent(t *testing.T) {
 	}
 	if codes[429]+codes[500] == 6 {
 		t.Errorf("every request rejected — counters are not independent: %v", codes)
+	}
+}
+
+func TestOpenAPIServed(t *testing.T) {
+	s := &server{t: &transcriber{model: "m.bin"}}
+	rec := httptest.NewRecorder()
+	s.openapi(rec, httptest.NewRequest("GET", "/v1/openapi.json", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &spec); err != nil {
+		t.Fatalf("body is not json: %v", err)
+	}
+	if _, ok := spec["openapi"]; !ok {
+		t.Errorf("no openapi field")
+	}
+	paths := spec["paths"].(map[string]any)
+	for _, p := range []string{"/health", "/v1/models", "/v1/audio/transcriptions", "/v1/audio/translations"} {
+		if _, ok := paths[p]; !ok {
+			t.Errorf("paths lacks %s", p)
+		}
 	}
 }
 

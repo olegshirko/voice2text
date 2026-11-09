@@ -1,0 +1,187 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "voice2text",
+    "description": "Офлайн-распознавание речи, API совместим с OpenAI Audio. Сервер может имитировать отказы для тренировки клиентов: -emulate-429, -emulate-500, -emulate-broken-json (grammar every:N, percent:P, first:N, always) и -slow N (задержка ответа в секундах). /health и /v1/models под имитацию не попадают.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Состояние сервера",
+        "responses": {
+          "200": {
+            "description": "Статус, версия сборки и имя модели",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "version": { "type": "string", "example": "20261109" },
+                    "model": { "type": "string", "example": "ggml-large-v3-turbo-q5_0.bin" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models": {
+      "get": {
+        "summary": "Список моделей в формате OpenAI",
+        "responses": {
+          "200": {
+            "description": "Один элемент: id whisper-1",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ModelList" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/audio/transcriptions": {
+      "post": {
+        "summary": "Распознавание речи",
+        "requestBody": { "$ref": "#/components/requestBodies/Audio" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Transcription" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "429": {
+            "description": "Rate limit (реальный при -concurrency, имитируемый при -emulate-429); несёт Retry-After",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "500": {
+            "description": "Ошибка сервера (реальная или имитируемая при -emulate-500)",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
+        }
+      }
+    },
+    "/v1/audio/translations": {
+      "post": {
+        "summary": "Перевод речи на английский (формат тот же, что у transcriptions)",
+        "requestBody": { "$ref": "#/components/requestBodies/Audio" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Transcription" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "429": { "description": "Rate limit", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Ошибка сервера", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    }
+  },
+  "components": {
+    "requestBodies": {
+      "Audio": {
+        "required": true,
+        "content": {
+          "multipart/form-data": {
+            "schema": {
+              "type": "object",
+              "required": ["file"],
+              "properties": {
+                "file": { "type": "string", "format": "binary", "description": "Любой файл, который открывает ffmpeg: mp4, mkv, mov, webm, mp3, m4a, wav, ogg" },
+                "language": { "type": "string", "description": "Код языка (ru, en, ...) или auto; по умолчанию ru" },
+                "response_format": { "type": "string", "enum": ["json", "text", "srt", "vtt", "verbose_json"], "default": "json" },
+                "prompt": { "type": "string", "description": "Подсказка для модели" },
+                "model": { "type": "string", "description": "Принимается и игнорируется" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Transcription": {
+        "description": "Результат в запрошенном формате",
+        "content": {
+          "application/json": {
+            "schema": {
+              "oneOf": [
+                { "$ref": "#/components/schemas/Transcription" },
+                { "$ref": "#/components/schemas/VerboseTranscription" }
+              ]
+            }
+          },
+          "text/plain": {
+            "schema": { "type": "string", "description": "Для response_format=text, srt, vtt" }
+          }
+        }
+      },
+      "Error": {
+        "description": "Ошибка в формате OpenAI",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+        }
+      }
+    },
+    "schemas": {
+      "Transcription": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" }
+        }
+      },
+      "VerboseTranscription": {
+        "type": "object",
+        "properties": {
+          "task": { "type": "string", "example": "transcribe" },
+          "language": { "type": "string", "description": "Запрошенный или определённый при language=auto" },
+          "duration": { "type": "number" },
+          "text": { "type": "string" },
+          "segments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "integer" },
+                "start": { "type": "number" },
+                "end": { "type": "number" },
+                "text": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "ModelList": {
+        "type": "object",
+        "properties": {
+          "object": { "type": "string", "example": "list" },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "example": "whisper-1" },
+                "object": { "type": "string", "example": "model" },
+                "owned_by": { "type": "string", "example": "voice2text" }
+              }
+            }
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "message": { "type": "string" },
+              "type": { "type": "string", "example": "rate_limit_error" },
+              "code": { "type": "string" },
+              "param": { "type": "string", "nullable": true }
+            }
+          }
+        }
+      }
+    }
+  }
+}

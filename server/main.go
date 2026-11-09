@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	_ "embed" // для go:embed []byte
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -85,6 +86,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /v1/models", s.models)
+	mux.HandleFunc("GET /v1/openapi.json", s.openapi)
 	mux.HandleFunc("POST /v1/audio/transcriptions", s.transcribe)
 	mux.HandleFunc("POST /v1/audio/translations", s.translate)
 	mux.HandleFunc("POST /inference", s.transcribe) // как у whisper-server
@@ -283,6 +285,18 @@ func (s *server) transcribeTask(task string, w http.ResponseWriter, r *http.Requ
 		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
 		io.WriteString(w, res.vtt())
 	}
+}
+
+// openapi отдаёт машиночитаемую спецификацию API: студенты видят контракт
+// формально, могут сгенерировать клиент или открыть в Swagger UI.
+//
+//go:embed openapi.json
+var openapiSpec []byte
+
+func (s *server) openapi(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(openapiSpec)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
