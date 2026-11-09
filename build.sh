@@ -88,6 +88,7 @@ stage() { # platform -> печатает путь к каталогу пакет
   mkdir -p "$d/bin" "$d/models" "$d/licenses"
   ln "$cache/models/$MODEL" "$d/models/$MODEL" 2>/dev/null || cp "$cache/models/$MODEL" "$d/models/$MODEL"
   cp "$here/README.dist.md" "$d/README.md"
+  cp -r "$here/examples" "$d/examples"
   cp "$here/licenses/"* "$d/licenses/"
   echo "$d"
 }

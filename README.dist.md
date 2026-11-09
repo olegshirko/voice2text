@@ -77,7 +77,11 @@ curl http://127.0.0.1:8080/v1/audio/translations -F file=@lecture.mp4
 Поля запроса: `file` (обязательное), `language` (по умолчанию `ru`),
 `response_format` (`json`, `text`, `srt`, `vtt`, `verbose_json`),
 `prompt`. Поле `model` принимается и игнорируется. Также доступны
-`GET /health` (статус, версия сборки и имя модели) и `GET /v1/models`.
+`GET /health` (статус, версия сборки и имя модели), `GET /v1/models`
+и `GET /v1/openapi.json` — спецификация API для Swagger UI.
+
+В `examples/` лежат клиенты на стандартных библиотеках (Python, Node,
+Go): ретраи на 429, обработка 500, таймауты, валидация ответа.
 
 ### Имитация 429
 
@@ -92,6 +96,13 @@ curl http://127.0.0.1:8080/v1/audio/translations -F file=@lecture.mp4
 ./serve.sh -emulate-429 always       # все
 ./serve.sh -emulate-429 every:2 -retry-after 60
 ```
+
+Grammar `every:N | percent:P | first:N | always` едина для всех
+`-emulate-*` флагов. Вдобавок: `-emulate-500 always` (серверные ошибки),
+`-emulate-broken-json always` (200 с обрезанным JSON) и `-slow 5`
+(задержка ответа, тренажёр таймаутов). Каждый ответ несёт
+`X-Request-Id` — переданный клиентом или сгенерированный, он же в логе
+сервера.
 
 `/health` и `/v1/models` под имитацию не попадают.
 
