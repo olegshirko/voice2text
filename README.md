@@ -39,6 +39,27 @@ transcribe.bat "C:\video\lecture.mp4"
 transcribe.bat "C:\video\lecture.mp4" en
 ```
 
+### Выбор модели
+
+Скрипт берёт первую `ggml-*.bin` из `models/`. Переменная
+`VOICE2TEXT_MODEL` задаёт другую: имя (шаблон `ggml-<имя>*.bin`,
+например `small`) или путь к файлу. На слабых машинах
+`VOICE2TEXT_MODEL=small` ускоряет распознавание в несколько раз.
+
+```bash
+VOICE2TEXT_MODEL=small ./transcribe.sh lecture.mp4
+```
+
+### Проверка
+
+В репозитории лежит короткий сэмпл записи — им можно проверить установку:
+
+```bash
+./transcribe.sh sample/sample-ru.m4a
+```
+
+В тексте должна появиться фраза «тестовая запись для проверки».
+
 ### Первый запуск
 
 - **macOS.** Бинарники не подписаны Apple. Скрипт сам снимает с них
@@ -73,6 +94,13 @@ result = client.audio.transcriptions.create(model="whisper-1", file=open("lectur
 print(result.text)
 ```
 
+Перевод на английский — `POST /v1/audio/translations`, формат запроса и
+ответа тот же (OpenAI всегда переводит на английский):
+
+```bash
+curl http://127.0.0.1:8080/v1/audio/translations -F file=@lecture.mp4
+```
+
 Поля запроса:
 
 | Поле | Значение |
@@ -83,7 +111,8 @@ print(result.text)
 | `prompt` | подсказка для модели |
 | `model` | принимается и игнорируется |
 
-Также доступны `GET /health` и `GET /v1/models`.
+Также доступны `GET /health` (статус, версия сборки и имя модели) и
+`GET /v1/models`.
 
 Флаги сервера:
 
@@ -174,7 +203,9 @@ whisper-cli для macOS из исходников (универсальный �
 `dist/`. Загрузки кэшируются в `.cache/`. Версии зависимостей
 закреплены в начале `build.sh`.
 
-Выпуск:
+Релизы собирает GitHub Actions ([ci.yml](.github/workflows/ci.yml)):
+тесты на каждый push, а по тегу `v*` — все пять архивов с
+sha256-суммами. Локально то же самое:
 
 ```bash
 gh release create v$(date +%Y%m%d) dist/*.zip

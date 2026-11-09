@@ -21,6 +21,16 @@ transcribe.bat "C:\video\lecture.mp4"
 transcribe.bat "C:\video\lecture.mp4" en
 ```
 
+### Выбор модели
+
+Скрипт берёт первую `ggml-*.bin` из `models/`. Переменная
+`VOICE2TEXT_MODEL` задаёт другую: имя (шаблон `ggml-<имя>*.bin`,
+например `small`) или путь к файлу:
+
+```bash
+VOICE2TEXT_MODEL=small ./transcribe.sh lecture.mp4
+```
+
 ### Первый запуск
 
 - **macOS.** Бинарники не подписаны Apple. Скрипт сам снимает с них
@@ -57,10 +67,17 @@ result = client.audio.transcriptions.create(model="whisper-1", file=open("lectur
 print(result.text)
 ```
 
+Перевод на английский — `POST /v1/audio/translations`, формат запроса и
+ответа тот же (OpenAI всегда переводит на английский):
+
+```bash
+curl http://127.0.0.1:8080/v1/audio/translations -F file=@lecture.mp4
+```
+
 Поля запроса: `file` (обязательное), `language` (по умолчанию `ru`),
 `response_format` (`json`, `text`, `srt`, `vtt`, `verbose_json`),
 `prompt`. Поле `model` принимается и игнорируется. Также доступны
-`GET /health` и `GET /v1/models`.
+`GET /health` (статус, версия сборки и имя модели) и `GET /v1/models`.
 
 ### Имитация 429
 
