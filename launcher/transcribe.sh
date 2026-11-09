@@ -44,7 +44,7 @@ model=
 if [ -n "${VOICE2TEXT_MODEL:-}" ]; then
   case "$VOICE2TEXT_MODEL" in
     */*) model=$VOICE2TEXT_MODEL ;;
-    *) model=$(ls "$here"/models/ggml-"$VOICE2TEXT_MODEL"*.bin 2>/dev/null | head -1) ;;
+    *) for f in "$here"/models/ggml-"$VOICE2TEXT_MODEL"*.bin; do model=$f; break; done ;;
   esac
   if [ -z "$model" ] || [ ! -f "$model" ]; then
     echo "no model: VOICE2TEXT_MODEL='$VOICE2TEXT_MODEL' not found in $here/models:" >&2
@@ -52,7 +52,9 @@ if [ -n "${VOICE2TEXT_MODEL:-}" ]; then
     exit 1
   fi
 else
-  model=$(ls "$here"/models/ggml-*.bin 2>/dev/null | head -1)
+  for f in "$here"/models/ggml-*.bin; do
+    if [ -f "$f" ]; then model=$f; break; fi
+  done
   if [ -z "$model" ]; then
     echo "no model found in $here/models" >&2
     exit 1
