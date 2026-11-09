@@ -36,7 +36,7 @@ if not defined MODEL (
 goto :model-done
 
 :model-override
-set "MPAT=ggml-%VOICE2TEXT_MODEL%*.bin"
+set "MPAT=%HERE%models\ggml-%VOICE2TEXT_MODEL%*.bin"
 if not "%VOICE2TEXT_MODEL:/=%"=="%VOICE2TEXT_MODEL%" set "MPAT=%VOICE2TEXT_MODEL%"
 for %%f in ("%MPAT%") do if exist "%%~ff" if not defined MODEL set "MODEL=%%~ff"
 if not defined MODEL (

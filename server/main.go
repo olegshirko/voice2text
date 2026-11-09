@@ -327,7 +327,13 @@ func (t *transcriber) run(ctx context.Context, src io.Reader, ext, task, lang, p
 	}
 
 	outBase := filepath.Join(dir, "out")
-	args := []string{"-m", t.model, "-l", lang, "-t", strconv.Itoa(t.threads), "-f", wav, "-oj", "-of", outBase, "-np"}
+	// Без -np whisper-cli печатает в stderr строку "auto-detected language: xx" —
+	// она нужна, чтобы отдать язык в verbose_json при language=auto. С -np
+	// whisper.cpp глушит все логи (cb_log_disable), и строка не появится.
+	args := []string{"-m", t.model, "-l", lang, "-t", strconv.Itoa(t.threads), "-f", wav, "-oj", "-of", outBase}
+	if lang != "auto" {
+		args = append(args, "-np")
+	}
 	if task == "translate" {
 		args = append(args, "-tr")
 	}
@@ -370,7 +376,7 @@ func (r *result) text() string {
 	return strings.Join(parts, " ")
 }
 
-var reDetectedLang = regexp.MustCompile(`auto-detected language = (\w+)`)
+var reDetectedLang = regexp.MustCompile(`auto-detected language: (\w+)`)
 
 // extractDetectedLang вытаскивает язык, который whisper-cli определил сам
 // (при -l auto), иначе пустую строку.

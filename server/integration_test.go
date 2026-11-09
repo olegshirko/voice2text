@@ -26,9 +26,14 @@ printf '%.0sX' $(seq 1 2048) >> "$out"
 `
 
 	// whisper-cli дописывает каждый аргумент отдельной строкой в $ARGS_FILE
-	// и пишет json-результат рядом с -of <base>.
+	// и пишет json-результат рядом с -of <base>. Без -np реальный whisper-cli
+	// печатает в stderr строку auto-detected language — заглушка повторяет это.
 	stubWhisper = `#!/bin/sh
 { for a in "$@"; do echo "$a"; done; } >> "$ARGS_FILE"
+case " $* " in
+  *" -np "*) ;;
+  *) echo "whisper_full_with_state: auto-detected language: ru (p = 0.999)" >&2 ;;
+esac
 prev=
 for a in "$@"; do
   [ "$prev" = "-of" ] && out="$a"
@@ -182,6 +187,29 @@ func TestPromptPassthrough(t *testing.T) {
 	args := stubArgs(t, argsFile)
 	if !hasPair(args, "--prompt", "X") {
 		t.Errorf("args %v: want --prompt X", args)
+	}
+}
+
+func TestAutoDetectLang(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	t.Setenv("ARGS_FILE", argsFile)
+	s := newStubServer(t)
+
+	body, ct := multipartFile(t, "a.mp3", map[string]string{"language": "auto", "response_format": "verbose_json"})
+	req := httptest.NewRequest("POST", "/v1/audio/transcriptions", body)
+	req.Header.Set("Content-Type", ct)
+	rec := httptest.NewRecorder()
+	s.transcribe(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if !contains(rec.Body.String(), `"language":"ru"`) {
+		t.Errorf("verbose_json(auto) must report detected language, got %s", rec.Body.String())
+	}
+	args := stubArgs(t, argsFile)
+	if hasFlag(args, "-np") {
+		t.Errorf("with language=auto, -np must be omitted so whisper-cli reports the detected language: %v", args)
 	}
 }
 

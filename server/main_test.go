@@ -114,7 +114,9 @@ func TestTranslationsRequiresFile(t *testing.T) {
 }
 
 func TestExtractDetectedLang(t *testing.T) {
-	if got := extractDetectedLang("whisper_full_with_state: auto-detected language = ru (p = 0.999)"); got != "ru" {
+	// Точный формат строки из whisper.cpp v1.9.4 (src/whisper.cpp:6956).
+	out := "whisper_full_with_state: auto-detected language: ru (p = 0.999)"
+	if got := extractDetectedLang(out); got != "ru" {
 		t.Errorf("extractDetectedLang = %q, want ru", got)
 	}
 	if got := extractDetectedLang("some other output\nwithout the line"); got != "" {
