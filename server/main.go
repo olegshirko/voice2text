@@ -25,6 +25,9 @@ import (
 	"time"
 )
 
+// version подставляется при сборке: -ldflags "-X main.version=<дата>".
+var version = "dev"
+
 func main() {
 	root := defaultRoot()
 	var (
@@ -148,7 +151,7 @@ type server struct {
 }
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "model": filepath.Base(s.t.model)})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": version, "model": filepath.Base(s.t.model)})
 }
 
 func (s *server) models(w http.ResponseWriter, r *http.Request) {

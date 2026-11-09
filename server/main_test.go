@@ -88,6 +88,15 @@ func TestHealthNotRateLimited(t *testing.T) {
 	}
 }
 
+func TestHealthVersion(t *testing.T) {
+	s := &server{t: &transcriber{model: "m.bin"}}
+	rec := httptest.NewRecorder()
+	s.health(rec, httptest.NewRequest("GET", "/health", nil))
+	if !contains(rec.Body.String(), `"version":"dev"`) {
+		t.Errorf("health must report version, got %s", rec.Body.String())
+	}
+}
+
 func TestFormats(t *testing.T) {
 	r := &result{segments: []segment{{0, 1500, "Привет"}, {1500, 3725, "мир"}}}
 	if got := r.text(); got != "Привет мир" {

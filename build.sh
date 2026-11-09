@@ -61,7 +61,7 @@ fetch_libgomp() { # arch: amd64|arm64
 build_server() { # GOOS GOARCH out
   [ -f "$3" ] && return
   log "build voice2text-server $1/$2"
-  (cd "$here/server" && CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -trimpath -ldflags '-s -w' -o "$3" .)
+  (cd "$here/server" && CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$3" .)
 }
 server_bin() { # GOOS GOARCH -> путь
   echo "$cache/server/voice2text-server-$1-$2"
