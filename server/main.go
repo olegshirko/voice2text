@@ -8,6 +8,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -264,9 +266,24 @@ func logRequests(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: 200}
+		// X-Request-Id: входящий от клиента пробрасывается обратно (корреляция
+		// клиент <-> лог), отсутствующий заменяется сгенерированным.
+		reqID := r.Header.Get("X-Request-Id")
+		if reqID == "" {
+			reqID = newRequestID()
+		}
+		rec.Header().Set("X-Request-Id", reqID)
 		h.ServeHTTP(rec, r)
-		log.Printf("%s %s -> %d (%s)", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond))
+		log.Printf("%s %s -> %d (%s) [%s]", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Millisecond), reqID)
 	})
+}
+
+func newRequestID() string {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }
 
 type statusRecorder struct {

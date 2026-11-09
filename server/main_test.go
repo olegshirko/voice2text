@@ -138,6 +138,32 @@ func TestVerboseUsesDetectedLang(t *testing.T) {
 	}
 }
 
+func TestRequestIDGenerated(t *testing.T) {
+	h := logRequests(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, httptest.NewRequest("GET", "/health", nil))
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest("GET", "/health", nil))
+	id1, id2 := rec1.Header().Get("X-Request-Id"), rec2.Header().Get("X-Request-Id")
+	if id1 == "" || id2 == "" {
+		t.Fatalf("X-Request-Id must be set, got %q and %q", id1, id2)
+	}
+	if id1 == id2 {
+		t.Errorf("two requests got the same id %q", id1)
+	}
+}
+
+func TestRequestIDEcho(t *testing.T) {
+	h := logRequests(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	req := httptest.NewRequest("GET", "/health", nil)
+	req.Header.Set("X-Request-Id", "my-id-123")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if got := rec.Header().Get("X-Request-Id"); got != "my-id-123" {
+		t.Errorf("X-Request-Id = %q, want echoed my-id-123", got)
+	}
+}
+
 func TestFormats(t *testing.T) {
 	r := &result{segments: []segment{{0, 1500, "Привет"}, {1500, 3725, "мир"}}}
 	if got := r.text(); got != "Привет мир" {
