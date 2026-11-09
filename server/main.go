@@ -80,7 +80,14 @@ func main() {
 		log.Printf("emulating 429: %s, Retry-After: %d", *emulate429, *retryAfter)
 	}
 	log.Printf("listening on http://%s  (POST /v1/audio/transcriptions)", *addr)
-	log.Fatal(http.ListenAndServe(*addr, logRequests(mux)))
+	// ReadTimeout/WriteTimeout — 0: загрузка файла и распознавание могут идти долго.
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           logRequests(mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
+	log.Fatal(srv.ListenAndServe())
 }
 
 // --- имитация 429 -----------------------------------------------------------
