@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+      - name: go vet + test
+        run: |
+          cd server
+          go vet ./...
+          go test ./...
+      - name: shellcheck
+        run: shellcheck launcher/*.sh
+
+  release:
+    # Сборка и публикация релиза по тегу v*; build.sh работает только на macOS.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+      - name: build all packages
+        run: ./build.sh
+      - name: checksums
+        run: |
+          cd dist
+          shasum -a 256 *.zip > SHA256SUMS.txt
+      - name: create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS.txt
