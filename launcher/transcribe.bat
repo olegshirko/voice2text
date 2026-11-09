@@ -23,13 +23,30 @@ set "OUTNAME=%~n1"
 set "LANGC=%~2"
 if "%LANGC%"=="" set "LANGC=ru"
 
+rem Model: first ggml-*.bin in models\, or VOICE2TEXT_MODEL - a name
+rem (ggml-<name>*.bin pattern) or a file path if it contains a slash.
 set "MODEL="
+if not "%VOICE2TEXT_MODEL%"=="" goto :model-override
 for %%f in ("%HERE%models\ggml-*.bin") do if not defined MODEL set "MODEL=%%~ff"
 if not defined MODEL (
   echo no model found in %HERE%models
   pause
   exit /b 1
 )
+goto :model-done
+
+:model-override
+set "MPAT=ggml-%VOICE2TEXT_MODEL%*.bin"
+if not "%VOICE2TEXT_MODEL:/=%"=="%VOICE2TEXT_MODEL%" set "MPAT=%VOICE2TEXT_MODEL%"
+for %%f in ("%MPAT%") do if exist "%%~ff" if not defined MODEL set "MODEL=%%~ff"
+if not defined MODEL (
+  echo no model: VOICE2TEXT_MODEL=%VOICE2TEXT_MODEL% not found in %HERE%models
+  dir /b "%HERE%models"
+  pause
+  exit /b 1
+)
+
+:model-done
 
 rem whisper-cli is built with MSVC and needs the VC++ runtime. Install it
 rem from Microsoft if it is missing (asks for admin rights once).

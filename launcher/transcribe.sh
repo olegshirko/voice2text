@@ -38,10 +38,25 @@ chmod +x "$here"/bin/* 2>/dev/null || true
 # `find ... | while read f; do ./transcribe.sh "$f"; done` они съедают
 # имена следующих файлов.
 
-model=$(ls "$here"/models/ggml-*.bin 2>/dev/null | head -1)
-if [ -z "$model" ]; then
-  echo "no model found in $here/models" >&2
-  exit 1
+# Модель: первая ggml-*.bin в models/, либо VOICE2TEXT_MODEL — имя
+# (шаблон ggml-<имя>*.bin) или путь к файлу, если содержит /.
+model=
+if [ -n "${VOICE2TEXT_MODEL:-}" ]; then
+  case "$VOICE2TEXT_MODEL" in
+    */*) model=$VOICE2TEXT_MODEL ;;
+    *) model=$(ls "$here"/models/ggml-"$VOICE2TEXT_MODEL"*.bin 2>/dev/null | head -1) ;;
+  esac
+  if [ -z "$model" ] || [ ! -f "$model" ]; then
+    echo "no model: VOICE2TEXT_MODEL='$VOICE2TEXT_MODEL' not found in $here/models:" >&2
+    ls "$here"/models 2>/dev/null >&2
+    exit 1
+  fi
+else
+  model=$(ls "$here"/models/ggml-*.bin 2>/dev/null | head -1)
+  if [ -z "$model" ]; then
+    echo "no model found in $here/models" >&2
+    exit 1
+  fi
 fi
 
 tmp="${TMPDIR:-/tmp}/voice2text-$$.wav"
