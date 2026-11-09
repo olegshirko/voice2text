@@ -9,11 +9,11 @@ import (
 
 func TestParseEmulate429(t *testing.T) {
 	for _, bad := range []string{"every", "every:0", "every:x", "percent:101", "sometimes:3", "first:-1"} {
-		if _, err := parseEmulate429(bad); err == nil {
+		if _, err := parseEmulateSpec(bad); err == nil {
 			t.Errorf("%q: expected error", bad)
 		}
 	}
-	if l, err := parseEmulate429(""); err != nil || l != nil {
+	if l, err := parseEmulateSpec(""); err != nil || l != nil {
 		t.Errorf("empty spec must disable emulation, got %v %v", l, err)
 	}
 }
@@ -31,7 +31,7 @@ func TestLimiterPattern(t *testing.T) {
 		{"percent:50", []bool{true, true, true, true, true, true}}, // первые 50 из каждой сотни
 	}
 	for _, c := range cases {
-		l, err := parseEmulate429(c.spec)
+		l, err := parseEmulateSpec(c.spec)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -44,7 +44,7 @@ func TestLimiterPattern(t *testing.T) {
 }
 
 func TestPercentOverHundred(t *testing.T) {
-	l, _ := parseEmulate429("percent:30")
+	l, _ := parseEmulateSpec("percent:30")
 	rejected := 0
 	for i := 0; i < 1000; i++ {
 		if l.reject() {
@@ -57,7 +57,7 @@ func TestPercentOverHundred(t *testing.T) {
 }
 
 func TestTranscribe429Response(t *testing.T) {
-	l, _ := parseEmulate429("always")
+	l, _ := parseEmulateSpec("always")
 	s := &server{limiter: l, retryAfter: 7}
 	rec := httptest.NewRecorder()
 	s.transcribe(rec, httptest.NewRequest("POST", "/v1/audio/transcriptions", nil))
@@ -79,7 +79,7 @@ func TestTranscribe429Response(t *testing.T) {
 }
 
 func TestHealthNotRateLimited(t *testing.T) {
-	l, _ := parseEmulate429("always")
+	l, _ := parseEmulateSpec("always")
 	s := &server{limiter: l, t: &transcriber{model: "m.bin"}}
 	rec := httptest.NewRecorder()
 	s.health(rec, httptest.NewRequest("GET", "/health", nil))
@@ -161,6 +161,49 @@ func TestRequestIDEcho(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if got := rec.Header().Get("X-Request-Id"); got != "my-id-123" {
 		t.Errorf("X-Request-Id = %q, want echoed my-id-123", got)
+	}
+}
+
+func TestEmulate500(t *testing.T) {
+	l500, _ := parseEmulateSpec("always")
+	s := &server{t: &transcriber{model: "m.bin"}, limiter500: l500}
+	rec := httptest.NewRecorder()
+	s.transcribe(rec, httptest.NewRequest("POST", "/v1/audio/transcriptions", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d, want 500", rec.Code)
+	}
+	if rec.Header().Get("Retry-After") != "" {
+		t.Errorf("500 must not carry Retry-After")
+	}
+	if !contains(rec.Body.String(), `"type":"server_error"`) {
+		t.Errorf("body %s lacks server_error type", rec.Body.String())
+	}
+	// Health не задет.
+	rec2 := httptest.NewRecorder()
+	s.health(rec2, httptest.NewRequest("GET", "/health", nil))
+	if rec2.Code != 200 {
+		t.Errorf("health must not be emulated, got %d", rec2.Code)
+	}
+}
+
+func Test429And500Independent(t *testing.T) {
+	l429, _ := parseEmulateSpec("every:2")
+	l500, _ := parseEmulateSpec("every:2")
+	s := &server{t: &transcriber{model: "m.bin"}, limiter: l429, limiter500: l500}
+	codes := map[int]int{}
+	for i := 0; i < 6; i++ {
+		rec := httptest.NewRecorder()
+		s.transcribe(rec, httptest.NewRequest("POST", "/v1/audio/transcriptions", nil))
+		codes[rec.Code]++
+	}
+	// Счётчики независимы: встречаются и 429, и 500, и часть запросов проходит
+	// оба фильтра (400 — дальше по пути: нет поля file). Если бы лимитеры
+	// делили один счётчик, каждый запрос отбивался бы одним из них.
+	if codes[429] == 0 || codes[500] == 0 {
+		t.Errorf("expected both 429 and 500, got %v", codes)
+	}
+	if codes[429]+codes[500] == 6 {
+		t.Errorf("every request rejected — counters are not independent: %v", codes)
 	}
 }
 

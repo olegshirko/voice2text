@@ -41,13 +41,18 @@ func main() {
 		threads     = flag.Int("threads", runtime.NumCPU(), "потоков для whisper-cli")
 		concurrency = flag.Int("concurrency", 1, "сколько запросов распознаются одновременно, остальные ждут")
 		emulate429  = flag.String("emulate-429", "", "имитировать 429: every:N (каждый N-й запрос), percent:P (P% запросов), first:N (первые N), always")
+		emulate500  = flag.String("emulate-500", "", "имитировать 500 (та же grammar): тренажёр отличения серверных ошибок от rate limit")
 		retryAfter  = flag.Int("retry-after", 20, "заголовок Retry-After в секундах для имитируемых 429")
 	)
 	flag.Parse()
 
-	limiter, err := parseEmulate429(*emulate429)
+	limiter, err := parseEmulateSpec(*emulate429)
 	if err != nil {
 		log.Fatalf("-emulate-429: %v", err)
+	}
+	limiter500, err := parseEmulateSpec(*emulate500)
+	if err != nil {
+		log.Fatalf("-emulate-500: %v", err)
 	}
 	if *model == "" {
 		*model, err = findModel(filepath.Join(root, "models"))
@@ -70,7 +75,7 @@ func main() {
 		}
 	}
 
-	s := &server{t: t, limiter: limiter, retryAfter: *retryAfter}
+	s := &server{t: t, limiter: limiter, limiter500: limiter500, retryAfter: *retryAfter}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /v1/models", s.models)
@@ -93,16 +98,17 @@ func main() {
 	log.Fatal(srv.ListenAndServe())
 }
 
-// --- имитация 429 -----------------------------------------------------------
+// --- имитация ошибок ----------------------------------------------------------
 
-// limiter решает, отдать ли на очередной запрос 429.
+// limiter решает по счётчику, отклонить ли очередной запрос.
+// Используется для -emulate-429 и -emulate-500 с одной grammar.
 type limiter struct {
 	mode    string // every | percent | first | always
 	n       int
 	counter atomic.Int64
 }
 
-func parseEmulate429(spec string) (*limiter, error) {
+func parseEmulateSpec(spec string) (*limiter, error) {
 	if spec == "" {
 		return nil, nil
 	}
@@ -157,7 +163,8 @@ func (l *limiter) reject() bool {
 
 type server struct {
 	t          *transcriber
-	limiter    *limiter
+	limiter    *limiter // -emulate-429
+	limiter500 *limiter // -emulate-500
 	retryAfter int
 }
 
@@ -193,6 +200,12 @@ func (s *server) transcribeTask(task string, w http.ResponseWriter, r *http.Requ
 		w.Header().Set("x-ratelimit-reset-requests", strconv.Itoa(s.retryAfter)+"s")
 		writeError(w, http.StatusTooManyRequests, "rate_limit_error", "rate_limit_exceeded",
 			fmt.Sprintf("Rate limit reached for requests. Please try again in %ds.", s.retryAfter))
+		return
+	}
+	if s.limiter500.reject() {
+		// Серверные ошибки клиент не обязан ретраить: Retry-After не ставим.
+		writeError(w, http.StatusInternalServerError, "server_error", "server_error",
+			"Internal server error (emulated)")
 		return
 	}
 
