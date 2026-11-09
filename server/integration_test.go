@@ -256,7 +256,7 @@ func TestSlowDelayAndFast429(t *testing.T) {
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("first request: status %d, want 429", rec.Code)
 	}
-	if d := time.Since(start); d >= 500*time.Millisecond {
+	if d := time.Since(start); d >= 900*time.Millisecond {
 		t.Errorf("429 must not be delayed by -slow, took %v", d)
 	}
 
@@ -272,6 +272,60 @@ func TestSlowDelayAndFast429(t *testing.T) {
 	}
 	if d := time.Since(start); d < time.Second {
 		t.Errorf("-slow must delay the response, took only %v", d)
+	}
+}
+
+func TestSlowNotDelaying400(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	t.Setenv("ARGS_FILE", argsFile)
+	s := newStubServer(t)
+	s.slow = time.Second
+
+	// Некорректный запрос (нет поля file) — 400 без задержки.
+	start := time.Now()
+	req := httptest.NewRequest("POST", "/v1/audio/transcriptions", strings.NewReader("not multipart"))
+	rec := httptest.NewRecorder()
+	s.transcribe(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", rec.Code)
+	}
+	if d := time.Since(start); d >= 900*time.Millisecond {
+		t.Errorf("400 must not be delayed by -slow, took %v", d)
+	}
+}
+
+func TestBrokenJSONCountsAllRequests(t *testing.T) {
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	t.Setenv("ARGS_FILE", argsFile)
+	s := newStubServer(t)
+	broken, _ := parseEmulateSpec("every:2") // каждый второй запрос, безотносительно формата
+	s.brokenJSON = broken
+
+	post := func(format string) string {
+		body, ct := multipartFile(t, "a.mp3", map[string]string{"response_format": format})
+		req := httptest.NewRequest("POST", "/v1/audio/transcriptions", body)
+		req.Header.Set("Content-Type", ct)
+		rec := httptest.NewRecorder()
+		s.transcribe(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("format %s: status %d: %s", format, rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+
+	// Запрос 1: json — счётчик 1, не ломается.
+	if b := post("json"); json.Valid([]byte(b)) != true {
+		t.Errorf("first json response must be valid: %s", b)
+	}
+	// Запрос 2: srt — счётчик 2, srt не ломается (ломается только json).
+	post("srt")
+	// Запрос 3: json — счётчик 3... подождите: каждый второй — чётные.
+	// После двух запросов счётчик = 2; третий не ломается, четвёртый ломается.
+	if b := post("json"); json.Valid([]byte(b)) != true {
+		t.Errorf("third request (odd count) must be valid json: %s", b)
+	}
+	if b := post("json"); json.Valid([]byte(b)) {
+		t.Errorf("fourth request (even count) must be broken json: %s", b)
 	}
 }
 

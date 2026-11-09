@@ -218,15 +218,9 @@ func (s *server) transcribeTask(task string, w http.ResponseWriter, r *http.Requ
 			"Internal server error (emulated)")
 		return
 	}
-	// Задержка только на пути к успешному ответу: отклонённые уходят быстро.
-	if s.slow > 0 {
-		select {
-		case <-time.After(s.slow):
-		case <-r.Context().Done():
-			return
-		}
-	}
-
+	// Счётчик broken-json — общий со всеми эмуляциями: считает каждый запрос,
+	// прошедший лимитеры, а не только успешные json-ответы.
+	broken := s.brokenJSON.reject()
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request_error", "", "expected multipart/form-data: "+err.Error())
 		return
@@ -253,6 +247,16 @@ func (s *server) transcribeTask(task string, w http.ResponseWriter, r *http.Requ
 		lang = s.t.lang
 	}
 
+	// Задержка на пути к распознаванию: ошибки (429/500/400) уходят быстро,
+	// таймаут клиента тренируется на честном ответе.
+	if s.slow > 0 {
+		select {
+		case <-time.After(s.slow):
+		case <-r.Context().Done():
+			return
+		}
+	}
+
 	res, err := s.t.run(r.Context(), file, filepath.Ext(hdr.Filename), task, lang, r.FormValue("prompt"))
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -265,7 +269,7 @@ func (s *server) transcribeTask(task string, w http.ResponseWriter, r *http.Requ
 
 	switch format {
 	case "json":
-		if s.brokenJSON.reject() {
+		if broken {
 			// 200 с обрезанным JSON: клиент обязан валидировать тело ответа.
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -331,7 +335,7 @@ func logRequests(h http.Handler) http.Handler {
 func newRequestID() string {
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		return fmt.Sprintf("%08x", time.Now().UnixNano()&0xffffffff)
 	}
 	return hex.EncodeToString(b)
 }

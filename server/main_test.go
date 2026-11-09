@@ -225,7 +225,10 @@ func TestOpenAPIServed(t *testing.T) {
 	if _, ok := spec["openapi"]; !ok {
 		t.Errorf("no openapi field")
 	}
-	paths := spec["paths"].(map[string]any)
+	paths, ok := spec["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("spec.paths is not a map: %v", spec["paths"])
+	}
 	for _, p := range []string{"/health", "/v1/models", "/v1/audio/transcriptions", "/v1/audio/translations"} {
 		if _, ok := paths[p]; !ok {
 			t.Errorf("paths lacks %s", p)

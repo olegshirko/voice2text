@@ -1,5 +1,8 @@
 {
   "openapi": "3.0.3",
+  "servers": [
+    { "url": "http://127.0.0.1:8080", "description": "Сервер по умолчанию (./serve.sh)" }
+  ],
   "info": {
     "title": "voice2text",
     "description": "Офлайн-распознавание речи, API совместим с OpenAI Audio. Сервер может имитировать отказы для тренировки клиентов: -emulate-429, -emulate-500, -emulate-broken-json (grammar every:N, percent:P, first:N, always) и -slow N (задержка ответа в секундах). /health и /v1/models под имитацию не попадают.",
@@ -43,15 +46,37 @@
         }
       }
     },
+    "/v1/openapi.json": {
+      "get": {
+        "summary": "Эта спецификация",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.0 документ",
+            "content": {
+              "application/json": { "schema": { "type": "object" } }
+            }
+          }
+        }
+      }
+    },
     "/v1/audio/transcriptions": {
       "post": {
         "summary": "Распознавание речи",
         "requestBody": { "$ref": "#/components/requestBodies/Audio" },
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Идентификатор запроса от клиента; возвращается в ответе и попадает в лог сервера. Без него сервер сгенерирует свой."
+          }
+        ],
         "responses": {
           "200": { "$ref": "#/components/responses/Transcription" },
           "400": { "$ref": "#/components/responses/Error" },
           "429": {
-            "description": "Rate limit (реальный при -concurrency, имитируемый при -emulate-429); несёт Retry-After",
+            "description": "Rate limit, имитируемый при -emulate-429; несёт Retry-After",
             "content": {
               "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
             }
@@ -72,8 +97,19 @@
         "responses": {
           "200": { "$ref": "#/components/responses/Transcription" },
           "400": { "$ref": "#/components/responses/Error" },
-          "429": { "description": "Rate limit", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": { "description": "Rate limit (имитируемый при -emulate-429), несёт Retry-After", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
           "500": { "description": "Ошибка сервера", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/inference": {
+      "post": {
+        "summary": "Алиас /v1/audio/transcriptions (совместимость с whisper-server)",
+        "deprecated": true,
+        "requestBody": { "$ref": "#/components/requestBodies/Audio" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Transcription" },
+          "400": { "$ref": "#/components/responses/Error" }
         }
       }
     }
@@ -102,6 +138,12 @@
     "responses": {
       "Transcription": {
         "description": "Результат в запрошенном формате",
+        "headers": {
+          "X-Request-Id": {
+            "description": "Идентификатор запроса: переданный клиентом или сгенерированный сервером; он же в логе сервера",
+            "schema": { "type": "string" }
+          }
+        },
         "content": {
           "application/json": {
             "schema": {
@@ -112,12 +154,21 @@
             }
           },
           "text/plain": {
-            "schema": { "type": "string", "description": "Для response_format=text, srt, vtt" }
+            "schema": { "type": "string", "description": "Для response_format=text и srt" }
+          },
+          "text/vtt": {
+            "schema": { "type": "string", "description": "Для response_format=vtt" }
           }
         }
       },
       "Error": {
-        "description": "Ошибка в формате OpenAI",
+        "description": "Ошибка в формате OpenAI; 429 несёт заголовок Retry-After (секунды) и x-ratelimit-*",
+        "headers": {
+          "X-Request-Id": {
+            "description": "Идентификатор запроса",
+            "schema": { "type": "string" }
+          }
+        },
         "content": {
           "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
         }
