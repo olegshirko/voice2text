@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -289,7 +290,8 @@ type segment struct {
 }
 
 type result struct {
-	segments []segment
+	segments     []segment
+	detectedLang string // "auto-detected language" из вывода whisper-cli, если была
 }
 
 func (t *transcriber) run(ctx context.Context, src io.Reader, ext, task, lang, prompt string) (*result, error) {
@@ -333,7 +335,8 @@ func (t *transcriber) run(ctx context.Context, src io.Reader, ext, task, lang, p
 		args = append(args, "--prompt", prompt)
 	}
 	cmd = exec.CommandContext(ctx, t.whisper, args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		return nil, fmt.Errorf("whisper-cli: %s", lastLines(string(out), 5))
 	}
 
@@ -350,7 +353,7 @@ func (t *transcriber) run(ctx context.Context, src io.Reader, ext, task, lang, p
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, fmt.Errorf("whisper json: %w", err)
 	}
-	res := &result{}
+	res := &result{detectedLang: extractDetectedLang(string(out))}
 	for _, s := range parsed.Transcription {
 		res.segments = append(res.segments, segment{s.Offsets.From, s.Offsets.To, strings.TrimSpace(s.Text)})
 	}
@@ -367,7 +370,21 @@ func (r *result) text() string {
 	return strings.Join(parts, " ")
 }
 
+var reDetectedLang = regexp.MustCompile(`auto-detected language = (\w+)`)
+
+// extractDetectedLang вытаскивает язык, который whisper-cli определил сам
+// (при -l auto), иначе пустую строку.
+func extractDetectedLang(output string) string {
+	if m := reDetectedLang.FindStringSubmatch(output); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
 func (r *result) verbose(lang string) map[string]any {
+	if lang == "auto" && r.detectedLang != "" {
+		lang = r.detectedLang
+	}
 	segs := make([]map[string]any, 0, len(r.segments))
 	var dur float64
 	for i, s := range r.segments {

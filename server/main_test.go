@@ -113,6 +113,29 @@ func TestTranslationsRequiresFile(t *testing.T) {
 	}
 }
 
+func TestExtractDetectedLang(t *testing.T) {
+	if got := extractDetectedLang("whisper_full_with_state: auto-detected language = ru (p = 0.999)"); got != "ru" {
+		t.Errorf("extractDetectedLang = %q, want ru", got)
+	}
+	if got := extractDetectedLang("some other output\nwithout the line"); got != "" {
+		t.Errorf("extractDetectedLang = %q, want empty", got)
+	}
+}
+
+func TestVerboseUsesDetectedLang(t *testing.T) {
+	r := &result{segments: []segment{{0, 1500, "x"}}, detectedLang: "de"}
+	v := r.verbose("auto")
+	if v["language"] != "de" {
+		t.Errorf("verbose(auto).language = %v, want de", v["language"])
+	}
+	if v := (&result{segments: []segment{{0, 1500, "x"}}}).verbose("auto"); v["language"] != "auto" {
+		t.Errorf("verbose(auto) without detection: language = %v, want auto", v["language"])
+	}
+	if v := r.verbose("ru"); v["language"] != "ru" {
+		t.Errorf("verbose(ru).language = %v, want ru", v["language"])
+	}
+}
+
 func TestFormats(t *testing.T) {
 	r := &result{segments: []segment{{0, 1500, "Привет"}, {1500, 3725, "мир"}}}
 	if got := r.text(); got != "Привет мир" {
