@@ -12,6 +12,7 @@
 #   (сервер умеет это имитировать: ./serve.sh -emulate-broken-json always)
 
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -38,11 +39,15 @@ def main():
     except OSError as e:
         fail(f"не могу прочитать {path}: {e}")
 
+    # Имя в Content-Disposition: только базовое, без кавычек и управляющих
+    # символов — иначе можно сломать тело multipart.
+    filename = "".join(c for c in os.path.basename(path) if c not in '"\\\r\n')
+
     # Границу делаем с uuid: устойчиво к любому содержимому файла.
     boundary = uuid.uuid4().hex
     body = (
         f'--{boundary}\r\n'
-        f'Content-Disposition: form-data; name="file"; filename="{path}"\r\n'
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
         f"Content-Type: application/octet-stream\r\n\r\n"
     ).encode() + audio + f"\r\n--{boundary}\r\n".encode() + (
         f'Content-Disposition: form-data; name="language"\r\n\r\n{lang}\r\n'
@@ -61,14 +66,21 @@ def main():
         )
         try:
             # timeout на весь запрос: без него зависший сервер подвесит клиента.
+            # Отмену клиента и таймаут на чтении ловим отдельными except ниже.
             with urllib.request.urlopen(req, timeout=300) as resp:
                 raw = resp.read()
                 req_id = resp.headers.get("X-Request-Id", "?")
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 # Rate limit: сервер сам сказал, сколько ждать (Retry-After).
-                # Плюс экспоненциальный запас — ждём вместе с другими клиентами.
-                wait = int(e.headers.get("Retry-After", "5")) + 2 ** attempt
+                # Retry-After может быть и HTTP-датой — тогда берём запас.
+                try:
+                    wait = int(e.headers.get("Retry-After", "5"))
+                except ValueError:
+                    wait = 5
+                wait += 2 ** attempt
+                if attempt == MAX_ATTEMPTS:
+                    fail(f"исчерпаны {MAX_ATTEMPTS} попыток на 429")
                 print(f"429, попытка {attempt}/{MAX_ATTEMPTS}, ждём {wait}с...", file=sys.stderr)
                 time.sleep(wait)
                 continue
@@ -80,6 +92,9 @@ def main():
             fail(f"{err} (HTTP {e.code})")
         except urllib.error.URLError as e:
             fail(f"сервер недоступен: {e.reason}")
+        except TimeoutError:
+            # Таймаут может прилететь и на чтении тела, не только на connect.
+            fail("сервер не уложился в таймаут")
 
         print(f"X-Request-Id: {req_id}", file=sys.stderr)
         # Валидация тела: 200 не гарантирует корректный JSON.
@@ -88,8 +103,6 @@ def main():
         except (json.JSONDecodeError, KeyError):
             fail("сервер вернул 200 с некорректным JSON — проверьте -emulate-broken-json")
         return
-
-    fail(f"исчерпаны {MAX_ATTEMPTS} попыток")
 
 
 if __name__ == "__main__":

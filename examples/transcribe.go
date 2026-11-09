@@ -3,16 +3,18 @@
 //
 //	go run transcribe.go http://127.0.0.1:8080 lecture.mp4 [ru]
 //
-// - загрузка файла через mime/multipart
-// - ретраи на 429 (Retry-After + экспоненциальный backoff, максимум 5 попыток)
-// - отказ ретраить 500
-// - таймаут через http.Client{Timeout} и контекст
-// - валидация тела ответа: 200 не гарантирует корректный JSON
-//   (сервер имитирует: ./serve.sh -emulate-broken-json always)
+//   - загрузка файла через mime/multipart
+//   - ретраи на 429 (Retry-After + экспоненциальный backoff, максимум 5 попыток)
+//   - отказ ретраить 500
+//   - таймаут через http.Client{Timeout} и контекст
+//   - валидация тела ответа: 200 не гарантирует корректный JSON
+//     (сервер имитирует: ./serve.sh -emulate-broken-json always)
 package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -55,7 +57,10 @@ func main() {
 			fail("%v", err)
 		}
 		req.Header.Set("Content-Type", contentType)
-		reqID := fmt.Sprintf("%08x", time.Now().UnixNano()&0xffffffff)
+		reqID, err := randomRequestID()
+		if err != nil {
+			fail("%v", err)
+		}
 		req.Header.Set("X-Request-Id", reqID) // сервер вернёт его в ответе
 
 		resp, err := client.Do(req)
@@ -63,8 +68,11 @@ func main() {
 			fail("сервер недоступен: %v", err)
 		}
 
-		raw, _ := io.ReadAll(resp.Body)
+		raw, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if err != nil {
+			fail("не дочитал ответ: %v", err)
+		}
 
 		switch resp.StatusCode {
 		case http.StatusOK:
@@ -82,6 +90,9 @@ func main() {
 			// Rate limit: Retry-After от сервера + экспоненциальный запас.
 			wait, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
 			wait += 1 << attempt
+			if attempt == maxAttempts {
+				fail("исчерпаны %d попыток на 429", maxAttempts)
+			}
 			fmt.Fprintf(os.Stderr, "429, попытка %d/%d, ждём %dс...\n", attempt, maxAttempts, wait)
 			time.Sleep(time.Duration(wait) * time.Second)
 		default:
@@ -99,6 +110,15 @@ func main() {
 		}
 	}
 	fail("исчерпаны %d попыток", maxAttempts)
+}
+
+// randomRequestID — 8 hex-символов из crypto/rand.
+func randomRequestID() (string, error) {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // multipartBody собирает multipart/form-data с полями file и language.

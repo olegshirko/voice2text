@@ -49,7 +49,11 @@ async function main() {
 
     if (resp.status === 429) {
       // Rate limit: Retry-After от сервера + экспоненциальный запас.
-      const wait = (parseInt(resp.headers.get("retry-after") || "5", 10) + 2 ** attempt) * 1000;
+      const ra = parseInt(resp.headers.get("retry-after") || "5", 10);
+      const wait = ((Number.isNaN(ra) ? 5 : ra) + 2 ** attempt) * 1000;
+      if (attempt === MAX_ATTEMPTS) {
+        fail(`исчерпаны ${MAX_ATTEMPTS} попыток на 429`);
+      }
       console.error(`429, попытка ${attempt}/${MAX_ATTEMPTS}, ждём ${wait / 1000}с...`);
       await sleep(wait);
       continue;
@@ -65,15 +69,19 @@ async function main() {
 
     console.error(`X-Request-Id: ${resp.headers.get("x-request-id") || "?"}`);
     const raw = await resp.text();
-    // Валидация тела: 200 не гарантирует корректный JSON.
+    // Валидация тела: 200 не гарантирует корректный JSON, а JSON — ключ text.
+    let parsed;
     try {
-      console.log(JSON.parse(raw).text);
+      parsed = JSON.parse(raw);
     } catch {
       fail("сервер вернул 200 с некорректным JSON — проверьте -emulate-broken-json");
     }
+    if (typeof parsed.text !== "string") {
+      fail(`в ответе нет поля text: ${raw.slice(0, 80)}`);
+    }
+    console.log(parsed.text);
     return;
   }
-  fail(`исчерпаны ${MAX_ATTEMPTS} попыток`);
 }
 
 main();
